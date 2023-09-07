@@ -10,6 +10,11 @@ interface Bot:
     def add_collateral(collateral: address, collateral_amount: uint256, lend_amount: uint256): nonpayable
     def repay(collateral: address, repay_amount: uint256): nonpayable
     def health(collateral: address) -> int256: view
+    def state(collateral: address) -> uint256[4]: view
+    def loan_exists(collateral: address) -> bool: view
+
+interface ERC20:
+    def balanceOf(_from: address) -> uint256: view
 
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10000
@@ -36,28 +41,43 @@ event DeployCurveLendingBot:
     router: address
     owner: address
 
-event Deposited:
-    bot: address
-    token0: address
-    amount0: uint256
-    amount1: uint256
-    unlock_time: uint256
-
-event Withdrawn:
-    bot: address
-    sdt_amount: uint256
-    out_token: address
-    out_amount: uint256
-
+# Bot <-> Pool
 event AddCollateral:
     bot: address
     collateral: address
     collateral_amount: uint256
-    lend_amount: uint256
+
+event RemoveCollateral:
+    bot: address
+    collateral: address
+    collateral_amount: uint256
+
+event Lend:
+    bot: address
+    amount: uint256
 
 event Repay:
     bot: address
+    amount: uint256
+
+# User <-> Bot
+
+event DepositCollateral:
+    bot: address
     collateral: address
+    collateral_amount: uint256
+
+event WithdrawCollateral:
+    bot: address
+    collateral: address
+    collateral_amount: uint256
+
+event StablecoinOut:
+    bot: address
+    withdraw_amount: uint256
+
+event StablecoinIn:
+    bot: address
     repay_amount: uint256
 
 event UpdateRefundWallet:
@@ -120,8 +140,18 @@ def add_collateral(bots: DynArray[address, MAX_SIZE], collateral: DynArray[addre
     for i in range(MAX_SIZE):
         if i >= _len:
             break
+        assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
         Bot(bots[i]).add_collateral(collateral[i], 0, lend_amount[i])
         log AddCollateral(bots[i], collateral[i], 0, lend_amount[i])
+
+@external
+def add_collateral_event(collateral: address, collateral_amount: uint256, lend_amount: uint256):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log AddCollateral(msg.sender, collateral, collateral_amount, lend_amount)
+
+@external
+def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount: uint256):
+    log AddCollateral(msg.sender, collateral, lend_amount, withdraw_amount)
 
 @external
 @nonreentrant('lock')
@@ -136,13 +166,48 @@ def repay(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_S
     for i in range(MAX_SIZE):
         if i >= _len:
             break
+        assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
         Bot(bots[i]).repay(collateral[i], repay_amount[i])
         log Repay(bots[i], collateral[i], repay_amount[i])
+
+@external
+def repay_event(collateral: address, repay_amount: uint256):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log Repay(msg.sender, collateral, repay_amount)
+
+@external
+def remove_collateral_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log RemoveCollateral(msg.sender, collateral, collateral_amount)
+    log Withdrawn(msg.sender, collateral, withdraw_amount)
+
+@external
+def withdraw_event(collateral: address, withdraw_amount: uint256):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log Withdrawn(msg.sender, collateral, withdraw_amount)
 
 @external
 @view
 def health(collateral: address, bot: address) -> int256:
     return Bot(bot).health(collateral)
+
+@external
+@view
+def loan_exists(collateral: address, bot: address) -> bool:
+    return Bot(bot).loan_exists(collateral)
+
+@external
+@view
+def collateral_reserves(collateral: address, bot: address) -> uint256:
+    if collateral == WETH:
+        return bot.balance
+    else:
+        return ERC20(collateral).balanceOf(bot)
+
+@external
+@view
+def state(collateral: address, bot: address) -> uint256[4]:
+    return Bot(bot).state(collateral)
 
 @external
 def update_compass(new_compass: address):
