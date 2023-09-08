@@ -52,16 +52,17 @@ event RemoveCollateral:
     collateral: address
     collateral_amount: uint256
 
-event Lend:
+event Borrow:
     bot: address
+    collateral: address
     amount: uint256
 
 event Repay:
     bot: address
+    collateral: address
     amount: uint256
 
 # User <-> Bot
-
 event DepositCollateral:
     bot: address
     collateral: address
@@ -72,13 +73,22 @@ event WithdrawCollateral:
     collateral: address
     collateral_amount: uint256
 
-event StablecoinOut:
+event OutputStablecoin:
     bot: address
-    withdraw_amount: uint256
+    amount: uint256
 
-event StablecoinIn:
+event InputStablecoin:
     bot: address
-    repay_amount: uint256
+    amount: uint256
+
+event FeePaid:
+    bot: address
+    collateral: address
+    amount: uint256
+
+event GasPaid:
+    bot: address
+    amount: uint256
 
 event UpdateRefundWallet:
     old_refund_wallet: address
@@ -128,6 +138,14 @@ def deploy_curve_lending_bot(router: address):
     log DeployCurveLendingBot(bot, router, msg.sender)
 
 @external
+def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log DepositCollateral(msg.sender, collateral, collateral_amount)
+    log AddCollateral(msg.sender, collateral, lend_amount)
+    log Borrow(msg.sender, collateral, debt)
+    log OutputStablecoin(msg.sender, withdraw_amount)
+
+@external
 @nonreentrant('lock')
 def add_collateral(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_SIZE], lend_amount: DynArray[uint256, MAX_SIZE]):
     assert msg.sender == self.compass, "Not compass"
@@ -136,22 +154,25 @@ def add_collateral(bots: DynArray[address, MAX_SIZE], collateral: DynArray[addre
     payload_len: uint256 = unsafe_add(unsafe_mul(unsafe_add(_len, 2), 96), 36)
     assert len(msg.data) == payload_len, "Invalid payload"
     assert self.paloma == convert(slice(msg.data, unsafe_sub(payload_len, 32), 32), bytes32), "Invalid paloma"
-    _fee_data: FeeData = self.fee_data
     for i in range(MAX_SIZE):
         if i >= _len:
             break
         assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
         Bot(bots[i]).add_collateral(collateral[i], 0, lend_amount[i])
-        log AddCollateral(bots[i], collateral[i], 0, lend_amount[i])
+        log AddCollateral(bots[i], collateral[i], lend_amount[i])
+        log GasPaid(bots[i], self.fee_data.gas_fee)
 
 @external
 def add_collateral_event(collateral: address, collateral_amount: uint256, lend_amount: uint256):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
-    log AddCollateral(msg.sender, collateral, collateral_amount, lend_amount)
+    log DepositCollateral(msg.sender, collateral, collateral_amount)
+    log AddCollateral(msg.sender, collateral, lend_amount)
 
 @external
 def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount: uint256):
-    log AddCollateral(msg.sender, collateral, lend_amount, withdraw_amount)
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log AddCollateral(msg.sender, collateral, lend_amount)
+    log Borrow(msg.sender, collateral, withdraw_amount)
 
 @external
 @nonreentrant('lock')
@@ -162,29 +183,33 @@ def repay(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_S
     payload_len: uint256 = unsafe_add(unsafe_mul(unsafe_add(_len, 2), 96), 36)
     assert len(msg.data) == payload_len, "Invalid payload"
     assert self.paloma == convert(slice(msg.data, unsafe_sub(payload_len, 32), 32), bytes32), "Invalid paloma"
-    _fee_data: FeeData = self.fee_data
     for i in range(MAX_SIZE):
         if i >= _len:
             break
         assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
         Bot(bots[i]).repay(collateral[i], repay_amount[i])
         log Repay(bots[i], collateral[i], repay_amount[i])
+        log GasPaid(bots[i], self.fee_data.gas_fee)
 
 @external
-def repay_event(collateral: address, repay_amount: uint256):
+def repay_event(collateral: address, input_amount: uint256, repay_amount: uint256):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log InputStablecoin(msg.sender, input_amount)
     log Repay(msg.sender, collateral, repay_amount)
 
 @external
 def remove_collateral_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
     log RemoveCollateral(msg.sender, collateral, collateral_amount)
-    log Withdrawn(msg.sender, collateral, withdraw_amount)
+    log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
 
 @external
 def withdraw_event(collateral: address, withdraw_amount: uint256):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
-    log Withdrawn(msg.sender, collateral, withdraw_amount)
+    if collateral == crvUSD:
+        log OutputStablecoin(msg.sender, withdraw_amount)
+    else:
+        log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
 
 @external
 @view

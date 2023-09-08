@@ -28,8 +28,9 @@ interface ERC20:
 
 interface Factory:
     def fee_data() -> FeeData: view
+    def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256): nonpayable
     def add_collateral_event(collateral: address, collateral_amount: uint256, lend_amount: uint256): nonpayable
-    def repay_event(collateral: address, repay_amount: uint256): nonpayable
+    def repay_event(collateral: address, input_amount: uint256, repay_amount: uint256): nonpayable
     def remove_collateral_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256): nonpayable
     def withdraw_event(collateral: address, withdraw_amount: uint256): nonpayable
     def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount: uint256): nonpayable
@@ -104,7 +105,9 @@ def create_loan(collateral: address, collateral_amount: uint256, lend_amount: ui
             self._safe_transfer(collateral, fee_data.service_fee_collector, fee_amount)
         self._safe_approve(collateral, controller, _lend_amount)
         Controller(controller).create_loan(_lend_amount, debt, N)
-    ERC20(crvUSD).transfer(OWNER, withdraw_amount)
+    if withdraw_amount > 0:
+        ERC20(crvUSD).transfer(OWNER, withdraw_amount)
+    Factory(FACTORY).create_loan_event(collateral, collateral_amount, lend_amount, debt, withdraw_amount)
 
 @external
 @payable
@@ -163,9 +166,11 @@ def borrow_more(collateral: address, collateral_amount: uint256, lend_amount: ui
     Factory(FACTORY).borrow_more_event(collateral, lend_amount, withdraw_amount)
 
 @external
-def repay(collateral: address, repay_amount: uint256):
+def repay(collateral: address, input_amount: uint256, repay_amount: uint256):
     assert msg.sender == OWNER or msg.sender == FACTORY, "Unauthorized"
     fee_data: FeeData = Factory(FACTORY).fee_data()
+    if msg.sender == OWNER and input_amount > 0:
+        ERC20(crvUSD).transferFrom(OWNER, self, input_amount)
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     ERC20(crvUSD).approve(controller, repay_amount)
     Controller(controller).repay(repay_amount)
@@ -173,7 +178,7 @@ def repay(collateral: address, repay_amount: uint256):
         assert self.balance >= fee_data.gas_fee, "Insufficient gas fee"
         send(fee_data.refund_wallet, fee_data.gas_fee)
     else:
-        Factory(FACTORY).repay_event(collateral, repay_amount)
+        Factory(FACTORY).repay_event(collateral, input_amount, repay_amount)
 
 @external
 def withdraw_crvusd(amount: uint256):
