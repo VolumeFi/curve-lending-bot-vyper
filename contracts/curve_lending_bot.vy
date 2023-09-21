@@ -1,4 +1,4 @@
-# @version 0.3.7
+# @version 0.3.9
 
 struct FeeData:
     refund_wallet: address
@@ -28,7 +28,7 @@ interface ERC20:
 
 interface Factory:
     def fee_data() -> FeeData: view
-    def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256): nonpayable
+    def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256): nonpayable
     def add_collateral_event(collateral: address, collateral_amount: uint256, lend_amount: uint256): nonpayable
     def repay_event(collateral: address, input_amount: uint256, repay_amount: uint256): nonpayable
     def remove_collateral_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256): nonpayable
@@ -84,7 +84,7 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
 @external
 @payable
 @nonreentrant('lock')
-def create_loan(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, N: uint256):
+def create_loan(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256):
     assert msg.sender == OWNER, "Unauthorized"
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     fee_data: FeeData = Factory(FACTORY).fee_data()
@@ -107,7 +107,7 @@ def create_loan(collateral: address, collateral_amount: uint256, lend_amount: ui
         Controller(controller).create_loan(_lend_amount, debt, N)
     if withdraw_amount > 0:
         ERC20(crvUSD).transfer(OWNER, withdraw_amount)
-    Factory(FACTORY).create_loan_event(collateral, collateral_amount, lend_amount, debt, withdraw_amount)
+    Factory(FACTORY).create_loan_event(collateral, collateral_amount, lend_amount, debt, withdraw_amount, health_threshold)
 
 @external
 @payable

@@ -16,6 +16,10 @@ interface Bot:
 interface ERC20:
     def balanceOf(_from: address) -> uint256: view
 
+interface ControllerFactory:
+    def WETH() -> address: view
+    def stablecoin() -> address: view
+
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10000
 WETH: immutable(address)
@@ -90,6 +94,11 @@ event GasPaid:
     bot: address
     amount: uint256
 
+event UpdateHealthThreshold:
+    collateral: address
+    bot: address
+    health_threshold: int256
+
 event UpdateRefundWallet:
     old_refund_wallet: address
     new_refund_wallet: address
@@ -110,7 +119,7 @@ event UpdateServiceFee:
     new_service_fee: uint256
 
 @external
-def __init__(_blueprint: address, _compass: address, controller_factory: address, weth: address, crv_usd: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_blueprint: address, _compass: address, controller_factory: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.blueprint = _blueprint
     self.compass = _compass
     self.fee_data = FeeData({
@@ -120,14 +129,14 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
         service_fee: _service_fee
     })
     CONTROLLER_FACTORY = controller_factory
-    WETH = weth
-    crvUSD = crv_usd
+    WETH = ControllerFactory(controller_factory).WETH()
+    crvUSD = ControllerFactory(controller_factory).stablecoin()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
     log UpdateRefundWallet(empty(address), _refund_wallet)
     log UpdateGasFee(empty(uint256), _gas_fee)
-    log UpdateCompass(empty(address), _compass)
-    log UpdateCompass(empty(address), _compass)
+    log UpdateServiceFeeCollector(empty(address), _service_fee_collector)
+    log UpdateServiceFee(empty(uint256), _service_fee)
 
 @external
 def deploy_curve_lending_bot(router: address):
@@ -138,12 +147,13 @@ def deploy_curve_lending_bot(router: address):
     log DeployCurveLendingBot(bot, router, msg.sender)
 
 @external
-def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256):
+def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
     log DepositCollateral(msg.sender, collateral, collateral_amount)
     log AddCollateral(msg.sender, collateral, lend_amount)
     log Borrow(msg.sender, collateral, debt)
     log OutputStablecoin(msg.sender, withdraw_amount)
+    log UpdateHealthThreshold(msg.sender, collateral, health_threshold)
 
 @external
 @nonreentrant('lock')
@@ -190,6 +200,10 @@ def repay(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_S
         Bot(bots[i]).repay(collateral[i], repay_amount[i])
         log Repay(bots[i], collateral[i], repay_amount[i])
         log GasPaid(bots[i], self.fee_data.gas_fee)
+
+@external
+def update_health_threshold(collateral: address, health_threshold: int256):
+    log UpdateHealthThreshold(self.owner_to_bot[msg.sender], collateral, health_threshold)
 
 @external
 def repay_event(collateral: address, input_amount: uint256, repay_amount: uint256):
@@ -273,7 +287,7 @@ def update_service_fee_collector(new_service_fee_collector: address):
     assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
     old_service_fee_collector: address = self.fee_data.service_fee_collector
     self.fee_data.service_fee_collector = new_service_fee_collector
-    log UpdateRefundWallet(old_service_fee_collector, new_service_fee_collector)
+    log UpdateServiceFeeCollector(old_service_fee_collector, new_service_fee_collector)
 
 @external
 def update_service_fee(new_service_fee: uint256):
