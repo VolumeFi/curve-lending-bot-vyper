@@ -42,7 +42,6 @@ event UpdateCompass:
 
 event DeployCurveLendingBot:
     bot: address
-    router: address
     owner: address
 
 # Bot <-> Pool
@@ -99,6 +98,16 @@ event UpdateHealthThreshold:
     bot: address
     health_threshold: int256
 
+event UpdateExpire:
+    collateral: address
+    bot: address
+    expire: uint256
+
+event UpdateRepayable:
+    collateral: address
+    bot: address
+    repayable: bool
+
 event UpdateRefundWallet:
     old_refund_wallet: address
     new_refund_wallet: address
@@ -139,21 +148,23 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     log UpdateServiceFee(empty(uint256), _service_fee)
 
 @external
-def deploy_curve_lending_bot(router: address):
+def deploy_curve_lending_bot():
     assert self.owner_to_bot[msg.sender] == empty(address), "Already user has bot"
     bot: address = create_from_blueprint(self.blueprint, CONTROLLER_FACTORY, WETH, crvUSD, msg.sender, code_offset=3)
     self.bot_to_owner[bot] = msg.sender
     self.owner_to_bot[msg.sender] = bot
-    log DeployCurveLendingBot(bot, router, msg.sender)
+    log DeployCurveLendingBot(bot, msg.sender)
 
 @external
-def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256):
+def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256, expire: uint256, repayable: bool):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
     log DepositCollateral(msg.sender, collateral, collateral_amount)
     log AddCollateral(msg.sender, collateral, lend_amount)
     log Borrow(msg.sender, collateral, debt)
     log OutputStablecoin(msg.sender, withdraw_amount)
     log UpdateHealthThreshold(msg.sender, collateral, health_threshold)
+    log UpdateExpire(msg.sender, collateral, expire)
+    log UpdateRepayable(msg.sender, collateral, repayable)
 
 @external
 @nonreentrant('lock')
