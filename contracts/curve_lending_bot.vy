@@ -34,6 +34,7 @@ interface Factory:
     def remove_collateral_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256): nonpayable
     def withdraw_event(collateral: address, withdraw_amount: uint256): nonpayable
     def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount: uint256): nonpayable
+    def bot_start_event(collateral: address, health_threshold: int256, expire: uint256, repayable: bool): nonpayable
 
 DENOMINATOR: constant(uint256) = 10000
 FACTORY: immutable(address)
@@ -184,6 +185,10 @@ def withdraw_crvusd(amount: uint256):
     assert msg.sender == OWNER, "Unauthorized"
     ERC20(crvUSD).transfer(OWNER, amount)
     Factory(FACTORY).withdraw_event(crvUSD, amount)
+
+@external
+def bot_restart(collateral: address, health_threshold: int256, expire: uint256, repayable: bool):
+    Factory(FACTORY).bot_start_event(collateral, health_threshold, expire, repayable)
 
 @external
 @view

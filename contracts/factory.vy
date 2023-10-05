@@ -93,19 +93,11 @@ event GasPaid:
     bot: address
     amount: uint256
 
-event UpdateHealthThreshold:
+event BotStarted:
     collateral: address
     bot: address
     health_threshold: int256
-
-event UpdateExpire:
-    collateral: address
-    bot: address
     expire: uint256
-
-event UpdateRepayable:
-    collateral: address
-    bot: address
     repayable: bool
 
 event UpdateRefundWallet:
@@ -162,9 +154,7 @@ def create_loan_event(collateral: address, collateral_amount: uint256, lend_amou
     log AddCollateral(msg.sender, collateral, lend_amount)
     log Borrow(msg.sender, collateral, debt)
     log OutputStablecoin(msg.sender, withdraw_amount)
-    log UpdateHealthThreshold(msg.sender, collateral, health_threshold)
-    log UpdateExpire(msg.sender, collateral, expire)
-    log UpdateRepayable(msg.sender, collateral, repayable)
+    log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
 
 @external
 @nonreentrant('lock')
@@ -213,10 +203,6 @@ def repay(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_S
         log GasPaid(bots[i], self.fee_data.gas_fee)
 
 @external
-def update_health_threshold(collateral: address, health_threshold: int256):
-    log UpdateHealthThreshold(self.owner_to_bot[msg.sender], collateral, health_threshold)
-
-@external
 def repay_event(collateral: address, input_amount: uint256, repay_amount: uint256):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
     log InputStablecoin(msg.sender, input_amount)
@@ -235,6 +221,11 @@ def withdraw_event(collateral: address, withdraw_amount: uint256):
         log OutputStablecoin(msg.sender, withdraw_amount)
     else:
         log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
+
+@external
+def bot_start_event(collateral: address, health_threshold: int256, expire: uint256, repayable: bool):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
 
 @external
 @view
