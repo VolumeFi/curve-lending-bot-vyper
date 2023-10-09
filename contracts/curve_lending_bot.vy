@@ -1,10 +1,17 @@
-# @version 0.3.7
+# @version 0.3.10
 
 struct FeeData:
     refund_wallet: address
     gas_fee: uint256
     service_fee_collector: address
     service_fee: uint256
+
+struct SwapInfo:
+    route: address[9]
+    swap_params: uint256[3][4]
+    amount: uint256
+    pools: address[4]
+    expected: uint256
 
 interface ControllerFactory:
     def get_controller(collateral: address) -> address: view
@@ -36,20 +43,34 @@ interface Factory:
     def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount: uint256): nonpayable
     def bot_start_event(collateral: address, health_threshold: int256, expire: uint256, repayable: bool): nonpayable
 
+interface CurveSwapRouter:
+    def exchange_multiple(
+        _route: address[9],
+        _swap_params: uint256[3][4],
+        _amount: uint256,
+        _expected: uint256,
+        _pools: address[4]=[ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+        _receiver: address=msg.sender
+    ) -> uint256: payable
+
 DENOMINATOR: constant(uint256) = 10000
+MAX_SIZE: constant(uint256) = 8
+VETH: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 FACTORY: immutable(address)
 CONTROLLER_FACTORY: immutable(address)
 OWNER: immutable(address)
 WETH: immutable(address)
 crvUSD: immutable(address)
+ROUTER: immutable(address)
 
 @external
-def __init__(controller_factory: address, weth: address, crv_usd: address, owner: address):
+def __init__(controller_factory: address, weth: address, crv_usd: address, owner: address, router: address):
     FACTORY = msg.sender
     CONTROLLER_FACTORY = controller_factory
     WETH = weth
     crvUSD = crv_usd
     OWNER = owner
+    ROUTER = router
 
 @internal
 def _safe_approve(_token: address, _to: address, _value: uint256):
@@ -108,6 +129,40 @@ def create_loan(collateral: address, collateral_amount: uint256, lend_amount: ui
     if withdraw_amount > 0:
         ERC20(crvUSD).transfer(OWNER, withdraw_amount)
     Factory(FACTORY).create_loan_event(collateral, collateral_amount, lend_amount, debt, withdraw_amount, health_threshold, expire, repayable)
+
+@external
+@payable
+@nonreentrant('lock')
+def add_collateral_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], lend_amount: uint256):
+    assert msg.sender == OWNER, "Unauthorized"
+    collateral_amount: uint256 = 0
+    for swap_info in swap_infos:
+        amount: uint256 = swap_info.amount
+        assert amount > 0, "Insufficient deposit"
+        if swap_info.route[0] == VETH:
+            assert msg.value >= amount, "Insufficient deposit"
+        else:
+            last_index: uint256 = 0
+            for i in range(4):
+                last_index = unsafe_sub(8, unsafe_add(i, i))
+                if swap_info.route[last_index] != empty(address):
+                    break
+                assert swap_info.route[last_index] == VETH, "Wrong path"
+            self._safe_approve(swap_info.route[0], ROUTER, amount)
+            amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+        collateral_amount += amount
+    assert collateral_amount > 0, "Insufficient lend"
+    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(WETH)
+    fee_data: FeeData = Factory(FACTORY).fee_data()
+    if fee_data.service_fee > 0:
+        service_fee_amount: uint256 = unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR)
+        if service_fee_amount > 0:
+            send(fee_data.service_fee_collector, service_fee_amount)
+        collateral_amount = unsafe_sub(collateral_amount, service_fee_amount)
+    if lend_amount > 0:
+        assert self.balance >= lend_amount, "Insufficient balance"
+    Controller(controller).add_collateral(lend_amount, value=lend_amount)
+    Factory(FACTORY).add_collateral_event(WETH, collateral_amount, lend_amount)
 
 @external
 @payable

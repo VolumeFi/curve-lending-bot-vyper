@@ -1,4 +1,9 @@
-# @version 0.3.7
+# @version 0.3.10
+"""
+@title Curve Lending Bot Factory
+@license Apache 2.0
+@author Volume.finance
+"""
 
 struct FeeData:
     refund_wallet: address
@@ -25,6 +30,7 @@ DENOMINATOR: constant(uint256) = 10000
 WETH: immutable(address)
 crvUSD: immutable(address)
 CONTROLLER_FACTORY: immutable(address)
+ROUTER: immutable(address)
 blueprint: public(address)
 compass: public(address)
 bot_to_owner: public(HashMap[address, address])
@@ -120,7 +126,7 @@ event UpdateServiceFee:
     new_service_fee: uint256
 
 @external
-def __init__(_blueprint: address, _compass: address, controller_factory: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_blueprint: address, _compass: address, controller_factory: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256, router: address):
     self.blueprint = _blueprint
     self.compass = _compass
     self.fee_data = FeeData({
@@ -131,6 +137,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     })
     CONTROLLER_FACTORY = controller_factory
     WETH = ControllerFactory(controller_factory).WETH()
+    ROUTER = router
     crvUSD = ControllerFactory(controller_factory).stablecoin()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
@@ -142,7 +149,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 @external
 def deploy_curve_lending_bot():
     assert self.owner_to_bot[msg.sender] == empty(address), "Already user has bot"
-    bot: address = create_from_blueprint(self.blueprint, CONTROLLER_FACTORY, WETH, crvUSD, msg.sender, code_offset=3)
+    bot: address = create_from_blueprint(self.blueprint, CONTROLLER_FACTORY, WETH, crvUSD, msg.sender, ROUTER, code_offset=3)
     self.bot_to_owner[bot] = msg.sender
     self.owner_to_bot[msg.sender] = bot
     log DeployCurveLendingBot(bot, msg.sender)
