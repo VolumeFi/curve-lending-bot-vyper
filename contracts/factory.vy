@@ -1,10 +1,11 @@
-# @version 0.3.10
+#pragma version 0.3.10
+#pragma optimize gas
+#pragma evm-version shanghai
 """
 @title Curve Lending Bot Factory
 @license Apache 2.0
 @author Volume.finance
 """
-
 struct FeeData:
     refund_wallet: address
     gas_fee: uint256

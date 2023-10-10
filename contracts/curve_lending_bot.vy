@@ -1,5 +1,11 @@
-# @version 0.3.10
-
+#pragma version 0.3.10
+#pragma optimize gas
+#pragma evm-version shanghai
+"""
+@title Curve Lending Bot
+@license Apache 2.0
+@author Volume.finance
+"""
 struct FeeData:
     refund_wallet: address
     gas_fee: uint256
@@ -158,7 +164,6 @@ def add_collateral_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], lend_amou
         service_fee_amount: uint256 = unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR)
         if service_fee_amount > 0:
             send(fee_data.service_fee_collector, service_fee_amount)
-        collateral_amount = unsafe_sub(collateral_amount, service_fee_amount)
     if lend_amount > 0:
         assert self.balance >= lend_amount, "Insufficient balance"
     Controller(controller).add_collateral(lend_amount, value=lend_amount)
