@@ -101,8 +101,8 @@ event GasPaid:
     amount: uint256
 
 event BotStarted:
-    collateral: address
     bot: address
+    collateral: address
     health_threshold: int256
     expire: uint256
     repayable: bool
