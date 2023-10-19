@@ -39,6 +39,9 @@ interface ERC20:
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
     def balanceOf(_from: address) -> uint256: view
 
+interface WrappedEth:
+    def withdraw(amount: uint256): nonpayable
+
 interface Factory:
     def fee_data() -> FeeData: view
     def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256, expire: uint256, repayable: bool): nonpayable
@@ -228,17 +231,39 @@ def borrow_more(collateral: address, collateral_amount: uint256, lend_amount: ui
 @external
 def repay(collateral: address, input_amount: uint256, repay_amount: uint256):
     assert msg.sender == OWNER or msg.sender == FACTORY, "Unauthorized"
+    assert input_amount > 0 or repay_amount > 0, "Wrong amount"
     fee_data: FeeData = Factory(FACTORY).fee_data()
     if msg.sender == OWNER and input_amount > 0:
         ERC20(crvUSD).transferFrom(OWNER, self, input_amount)
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
-    ERC20(crvUSD).approve(controller, repay_amount)
-    Controller(controller).repay(repay_amount)
+    if repay_amount > 0:
+        state: uint256[4] = Controller(controller).user_state(self)
+        assert repay_amount < state[2], "Cancel not allowed"
+        ERC20(crvUSD).approve(controller, repay_amount)
+        Controller(controller).repay(repay_amount)
     if msg.sender == FACTORY:
         assert self.balance >= fee_data.gas_fee, "Insufficient gas fee"
         send(fee_data.refund_wallet, fee_data.gas_fee)
     else:
         Factory(FACTORY).repay_event(collateral, input_amount, repay_amount)
+
+@external
+@nonreentrant('lock')
+def cancel(collateral: address):
+    assert msg.sender == OWNER, "Unauthorized"
+    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
+    state: uint256[4] = Controller(controller).user_state(self)
+    crv_usd_balance: uint256 = ERC20(crvUSD).balanceOf(self)
+    if crv_usd_balance < state[2]:
+        crv_usd_balance = unsafe_sub(state[2], crv_usd_balance)
+        ERC20(crvUSD).transferFrom(OWNER, self, crv_usd_balance)
+    ERC20(crvUSD).approve(controller, state[2])
+    Controller(controller).repay(state[2])
+    if collateral == WETH:
+        WrappedEth(WETH).withdraw(state[0])
+        send(OWNER, state[0])
+    else:
+        self._safe_transfer(collateral, OWNER, state[1])
 
 @external
 def withdraw_crvusd(amount: uint256):
@@ -271,4 +296,4 @@ def state(collateral: address) -> uint256[4]:
 @external
 @payable
 def __default__():
-    assert msg.sender == OWNER or msg.sender == ControllerFactory(CONTROLLER_FACTORY).get_controller(WETH), "ETH receive"
+    pass
