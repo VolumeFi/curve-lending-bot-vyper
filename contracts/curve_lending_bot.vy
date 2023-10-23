@@ -51,6 +51,7 @@ interface Factory:
     def withdraw_event(collateral: address, withdraw_amount: uint256): nonpayable
     def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount: uint256): nonpayable
     def bot_start_event(collateral: address, health_threshold: int256, expire: uint256, repayable: bool): nonpayable
+    def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256, input_amount: uint256, repay_amount: uint256): nonpayable
 
 interface CurveSwapRouter:
     def exchange_multiple(
@@ -260,10 +261,10 @@ def cancel(collateral: address):
     ERC20(crvUSD).approve(controller, state[2])
     Controller(controller).repay(state[2])
     if collateral == WETH:
-        WrappedEth(WETH).withdraw(state[0])
         send(OWNER, state[0])
     else:
         self._safe_transfer(collateral, OWNER, state[1])
+    Factory(FACTORY).cancel_event(collateral, state[0], state[0], crv_usd_balance, state[2])
 
 @external
 def withdraw_crvusd(amount: uint256):

@@ -107,6 +107,10 @@ event BotStarted:
     expire: uint256
     repayable: bool
 
+event BotCanceled:
+    bot: address
+    collateral: address
+
 event UpdateRefundWallet:
     old_refund_wallet: address
     new_refund_wallet: address
@@ -163,6 +167,15 @@ def create_loan_event(collateral: address, collateral_amount: uint256, lend_amou
     log Borrow(msg.sender, collateral, debt)
     log OutputStablecoin(msg.sender, withdraw_amount)
     log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
+
+@external
+def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256, input_amount: uint256, repay_amount: uint256):
+    assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
+    log InputStablecoin(msg.sender, input_amount)
+    log Repay(msg.sender, collateral, repay_amount)
+    log RemoveCollateral(msg.sender, collateral, collateral_amount)
+    log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
+    log BotCanceled(msg.sender, collateral)
 
 @external
 @nonreentrant('lock')
