@@ -28,7 +28,7 @@ interface Controller:
     def remove_collateral(collateral: uint256): nonpayable
     def borrow_more(collateral: uint256, debt: uint256): payable
     def repay(_d_debt: uint256): nonpayable
-    def health(user: address) -> int256: view
+    def health(user: address, full: bool) -> int256: view
     def loan_exists(user: address) -> bool: view
     def user_state(user: address) -> uint256[4]: view
 
@@ -280,7 +280,7 @@ def bot_restart(collateral: address, health_threshold: int256, expire: uint256, 
 @view
 def health(collateral: address) -> int256:
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
-    return Controller(controller).health(self)
+    return Controller(controller).health(self, True)
 
 @external
 @view
