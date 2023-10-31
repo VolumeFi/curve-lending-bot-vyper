@@ -12,9 +12,16 @@ struct FeeData:
     service_fee_collector: address
     service_fee: uint256
 
+struct SwapInfo:
+    route: address[9]
+    swap_params: uint256[3][4]
+    amount: uint256
+    pools: address[4]
+    expected: uint256
+
 interface Bot:
-    def add_collateral(collateral: address, collateral_amount: uint256, lend_amount: uint256): nonpayable
-    def repay(collateral: address, repay_amount: uint256): nonpayable
+    def add_collateral(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, lend_amount: uint256): nonpayable
+    def repay(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, repay_amount: uint256): nonpayable
     def health(collateral: address) -> int256: view
     def state(collateral: address) -> uint256[4]: view
     def loan_exists(collateral: address) -> bool: view
@@ -191,7 +198,7 @@ def add_collateral(bots: DynArray[address, MAX_SIZE], collateral: DynArray[addre
         if i >= _len:
             break
         assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
-        Bot(bots[i]).add_collateral(collateral[i], 0, lend_amount[i])
+        Bot(bots[i]).add_collateral([], collateral[i], lend_amount[i])
         log AddCollateral(bots[i], collateral[i], lend_amount[i])
         log GasPaid(bots[i], self.fee_data.gas_fee)
 
@@ -220,8 +227,7 @@ def repay(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_S
         if i >= _len:
             break
         assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
-        Bot(bots[i]).repay(collateral[i], repay_amount[i])
-        log Repay(bots[i], collateral[i], repay_amount[i])
+        Bot(bots[i]).repay([], collateral[i], repay_amount[i])
         log GasPaid(bots[i], self.fee_data.gas_fee)
 
 @external

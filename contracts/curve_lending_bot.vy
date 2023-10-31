@@ -115,55 +115,37 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
 @external
 @payable
 @nonreentrant('lock')
-def create_loan(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
-    assert msg.sender == OWNER, "Unauthorized"
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
-    fee_data: FeeData = Factory(FACTORY).fee_data()
-    fee_amount: uint256 = unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR)
-    _lend_amount: uint256 = lend_amount
-    if _lend_amount > collateral_amount - fee_amount:
-        _lend_amount = unsafe_sub(collateral_amount, fee_amount)
-    if collateral == WETH:
-        assert msg.value >= collateral_amount, "Insufficient ETH"
-        if msg.value > collateral_amount:
-            send(OWNER, unsafe_sub(msg.value, collateral_amount))
-        if fee_amount > 0:
-            send(fee_data.service_fee_collector, fee_amount)
-        Controller(controller).create_loan(_lend_amount, debt, N, value=_lend_amount)
-    else:
-        self._safe_transfer_from(collateral, OWNER, self, collateral_amount)
-        if fee_amount > 0:
-            self._safe_transfer(collateral, fee_data.service_fee_collector, fee_amount)
-        self._safe_approve(collateral, controller, _lend_amount)
-        Controller(controller).create_loan(_lend_amount, debt, N)
-    if withdraw_amount > 0:
-        ERC20(crvUSD).transfer(OWNER, withdraw_amount)
-    Factory(FACTORY).create_loan_event(collateral, collateral_amount, lend_amount, debt, withdraw_amount, health_threshold, leverage, expire, repayable)
-
-@external
-@payable
-@nonreentrant('lock')
-def create_loan_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
+def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
     assert msg.sender == OWNER, "Unauthorized"
     collateral_amount: uint256 = 0
     for swap_info in swap_infos:
+        last_index: uint256 = 0
+        for i in range(5): # to the first
+            last_index = unsafe_sub(8, unsafe_add(i, i))
+            if swap_info.route[last_index] != empty(address):
+                break
+        assert swap_info.route[last_index] == collateral or (swap_info.route[last_index] == VETH and collateral == WETH), "Wrong path"
         amount: uint256 = swap_info.amount
         assert amount > 0, "Insufficient deposit"
-        if swap_info.route[0] == VETH and collateral == WETH:
-            assert msg.value >= amount, "Insufficient deposit"
-        elif swap_info.route[0] == collateral:
-            self._safe_transfer_from(collateral, msg.sender, self, amount)
-            if collateral == WETH:
-                WrappedEth(WETH).withdraw(amount)
+        if collateral == WETH:
+            if swap_info.route[0] == VETH:
+                assert msg.value >= amount, "Insufficient deposit"
+            else:
+                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                if swap_info.route[0] == WETH:
+                    WrappedEth(WETH).withdraw(amount)
+                else:
+                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         else:
-            last_index: uint256 = 0
-            for i in range(4):
-                last_index = unsafe_sub(8, unsafe_add(i, i))
-                if swap_info.route[last_index] != empty(address):
-                    break
-                assert swap_info.route[last_index] == VETH, "Wrong path"
-            self._safe_approve(swap_info.route[0], ROUTER, amount)
-            amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+            if swap_info.route[0] == VETH:
+                assert msg.value >= amount, "Insufficient deposit"
+                amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
+            else:
+                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                if swap_info.route[0] != collateral:
+                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         collateral_amount += amount
     assert collateral_amount > 0, "Insufficient lend"
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
@@ -173,9 +155,6 @@ def create_loan_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: 
     if _lend_amount > collateral_amount - fee_amount:
         _lend_amount = unsafe_sub(collateral_amount, fee_amount)
     if collateral == WETH:
-        assert msg.value >= collateral_amount, "Insufficient ETH"
-        if msg.value > collateral_amount:
-            send(OWNER, unsafe_sub(msg.value, collateral_amount))
         if fee_amount > 0:
             send(fee_data.service_fee_collector, fee_amount)
         Controller(controller).create_loan(_lend_amount, debt, N, value=_lend_amount)
@@ -193,41 +172,39 @@ def create_loan_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: 
 @external
 @payable
 @nonreentrant('lock')
-def add_collateral_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], lend_amount: uint256):
-    assert msg.sender == OWNER, "Unauthorized"
-    collateral_amount: uint256 = 0
-    for swap_info in swap_infos:
-        amount: uint256 = swap_info.amount
-        assert amount > 0, "Insufficient deposit"
-        if swap_info.route[0] == VETH:
-            assert msg.value >= amount, "Insufficient deposit"
-        else:
-            last_index: uint256 = 0
-            for i in range(4):
-                last_index = unsafe_sub(8, unsafe_add(i, i))
-                if swap_info.route[last_index] != empty(address):
-                    break
-                assert swap_info.route[last_index] == VETH, "Wrong path"
-            self._safe_approve(swap_info.route[0], ROUTER, amount)
-            amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
-        collateral_amount += amount
-    assert collateral_amount > 0, "Insufficient lend"
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(WETH)
-    fee_data: FeeData = Factory(FACTORY).fee_data()
-    if fee_data.service_fee > 0:
-        service_fee_amount: uint256 = unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR)
-        if service_fee_amount > 0:
-            send(fee_data.service_fee_collector, service_fee_amount)
-    if lend_amount > 0:
-        assert self.balance >= lend_amount, "Insufficient balance"
-    Controller(controller).add_collateral(lend_amount, value=lend_amount)
-    Factory(FACTORY).add_collateral_event(WETH, collateral_amount, lend_amount)
-
-@external
-@payable
-@nonreentrant('lock')
-def add_collateral(collateral: address, collateral_amount: uint256, lend_amount: uint256):
+def add_collateral(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, lend_amount: uint256):
     assert msg.sender == OWNER or msg.sender == FACTORY, "Unauthorized"
+    collateral_amount: uint256 = 0
+    for swap_info in swap_infos:
+        last_index: uint256 = 0
+        for i in range(5): # to the first
+            last_index = unsafe_sub(8, unsafe_add(i, i))
+            if swap_info.route[last_index] != empty(address):
+                break
+        assert swap_info.route[last_index] == collateral or (swap_info.route[last_index] == VETH and collateral == WETH), "Wrong path"
+        amount: uint256 = swap_info.amount
+        assert amount > 0, "Insufficient deposit"
+        if collateral == WETH:
+            if swap_info.route[0] == VETH:
+                assert msg.value >= amount, "Insufficient deposit"
+            else:
+                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                if swap_info.route[0] == WETH:
+                    WrappedEth(WETH).withdraw(amount)
+                else:
+                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+        else:
+            if swap_info.route[0] == VETH:
+                assert msg.value >= amount, "Insufficient deposit"
+                amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
+            else:
+                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                if swap_info.route[0] != collateral:
+                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+        collateral_amount += amount
+    assert collateral_amount > 0 or lend_amount > 0, "Wrong input"
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     fee_data: FeeData = Factory(FACTORY).fee_data()
     if collateral == WETH:
@@ -237,10 +214,8 @@ def add_collateral(collateral: address, collateral_amount: uint256, lend_amount:
             assert self.balance >= lend_amount, "Insufficient balance"
             Controller(controller).add_collateral(lend_amount, value=lend_amount)
     else:
-        if collateral_amount > 0:
-            self._safe_transfer_from(collateral, OWNER, self, collateral_amount)
-            if fee_data.service_fee > 0:
-                self._safe_transfer(collateral, fee_data.service_fee_collector, unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR))
+        if collateral_amount > 0 and fee_data.service_fee > 0:
+            self._safe_transfer(collateral, fee_data.service_fee_collector, unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR))
         if lend_amount > 0:
             assert ERC20(collateral).balanceOf(self) >= lend_amount, "Insufficient balance"
             self._safe_approve(collateral, controller, lend_amount)
@@ -279,36 +254,18 @@ def borrow_more(collateral: address, collateral_amount: uint256, lend_amount: ui
     ERC20(crvUSD).transfer(OWNER, withdraw_amount)
     Factory(FACTORY).borrow_more_event(collateral, lend_amount, withdraw_amount)
 
-@external
-def repay(collateral: address, repay_amount: uint256, input_amount: uint256 = 0):
-    assert msg.sender == OWNER or msg.sender == FACTORY, "Unauthorized"
-    assert input_amount > 0 or repay_amount > 0, "Wrong amount"
-    fee_data: FeeData = Factory(FACTORY).fee_data()
-    if msg.sender == OWNER and input_amount > 0:
-        ERC20(crvUSD).transferFrom(OWNER, self, input_amount)
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
-    if repay_amount > 0:
-        state: uint256[4] = Controller(controller).user_state(self)
-        assert repay_amount < state[2], "Cancel not allowed"
-        ERC20(crvUSD).approve(controller, repay_amount)
-        Controller(controller).repay(repay_amount)
-    if msg.sender == FACTORY:
-        assert self.balance >= fee_data.gas_fee, "Insufficient gas fee"
-        send(fee_data.refund_wallet, fee_data.gas_fee)
-    else:
-        Factory(FACTORY).repay_event(collateral, input_amount, repay_amount)
-
 # repay_amount : 0 --> full repay
 @external
 @payable
-def repay_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, repay_amount: uint256):
-    assert msg.sender == OWNER, "Unauthorized"
-    stablecoin_amount: uint256 = 0
+@nonreentrant('lock')
+def repay(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, repay_amount: uint256):
+    assert msg.sender == OWNER or msg.sender == FACTORY, "Unauthorized"
+    input_amount: uint256 = 0
     for swap_info in swap_infos:
         amount: uint256 = swap_info.amount
         assert amount > 0, "Insufficient deposit"
         if swap_info.route[0] != VETH:
-            self._safe_transfer_from(crvUSD, msg.sender, self, amount)
+            self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
         if swap_info.route[0] != crvUSD:
             if swap_info.route[0] == VETH:
                 assert msg.value >= amount, "Insufficient deposit"
@@ -322,9 +279,14 @@ def repay_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: addres
                     assert swap_info.route[last_index] == VETH, "Wrong path"
                 self._safe_approve(swap_info.route[0], ROUTER, amount)
                 amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
-        stablecoin_amount += amount
+        input_amount += amount
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     state: uint256[4] = Controller(controller).user_state(self)
+    stablecoin_amount: uint256 = unsafe_add(ERC20(crvUSD).balanceOf(self), input_amount)
+    fee_data: FeeData = Factory(FACTORY).fee_data()
+    if msg.sender == FACTORY:
+        assert self.balance >= fee_data.gas_fee, "Insufficient gas fee"
+        send(fee_data.refund_wallet, fee_data.gas_fee)
     if repay_amount == 0:
         assert stablecoin_amount >= state[2], "Insufficient for full repay"
         ERC20(crvUSD).approve(controller, state[2])
@@ -336,25 +298,7 @@ def repay_with_swap(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: addres
         Factory(FACTORY).cancel_event(collateral, state[0], state[0], stablecoin_amount, state[2])
     else:
         assert repay_amount < state[2], "Cancel not allowed"
-        Factory(FACTORY).repay_event(collateral, stablecoin_amount, repay_amount)
-
-@external
-@nonreentrant('lock')
-def cancel(collateral: address):
-    assert msg.sender == OWNER, "Unauthorized"
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
-    state: uint256[4] = Controller(controller).user_state(self)
-    crv_usd_balance: uint256 = ERC20(crvUSD).balanceOf(self)
-    if crv_usd_balance < state[2]:
-        crv_usd_balance = unsafe_sub(state[2], crv_usd_balance)
-        ERC20(crvUSD).transferFrom(OWNER, self, crv_usd_balance)
-    ERC20(crvUSD).approve(controller, state[2])
-    Controller(controller).repay(state[2])
-    if collateral == WETH:
-        send(OWNER, state[0])
-    else:
-        self._safe_transfer(collateral, OWNER, state[1])
-    Factory(FACTORY).cancel_event(collateral, state[0], state[0], crv_usd_balance, state[2])
+        Factory(FACTORY).repay_event(collateral, input_amount, repay_amount)
 
 @external
 def withdraw_crvusd(amount: uint256):
