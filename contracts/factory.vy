@@ -59,6 +59,11 @@ event DeployCurveLendingBot:
     owner: address
 
 # Bot <-> Pool
+event AdditionalToken:
+    bot: address
+    token: address
+    amount: uint256
+
 event AddCollateral:
     bot: address
     collateral: address
@@ -111,7 +116,6 @@ event BotStarted:
     bot: address
     collateral: address
     health_threshold: int256
-    leverage: uint256
     expire: uint256
     repayable: bool
 
@@ -168,13 +172,17 @@ def deploy_curve_lending_bot():
     log DeployCurveLendingBot(bot, msg.sender)
 
 @external
-def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
+def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, additional_tokens: DynArray[address, MAX_SIZE], additional_amounts: DynArray[uint256, MAX_SIZE], withdraw_amount: uint256, health_threshold: int256, expire: uint256, repayable: bool):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
     log DepositCollateral(msg.sender, collateral, collateral_amount)
     log AddCollateral(msg.sender, collateral, lend_amount)
+    i: uint256 = 0
+    for add_token in additional_tokens:
+        log AdditionalToken(msg.sender, add_token, additional_amounts[i])
+        i = unsafe_add(i, 1)
     log Borrow(msg.sender, collateral, debt)
     log OutputStablecoin(msg.sender, withdraw_amount)
-    log BotStarted(msg.sender, collateral, health_threshold, leverage, expire, repayable)
+    log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
 
 @external
 def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256, input_amount: uint256, repay_amount: uint256):
@@ -187,7 +195,7 @@ def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amoun
 
 @external
 @nonreentrant('lock')
-def add_collateral(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_SIZE], lend_amount: DynArray[uint256, MAX_SIZE]):
+def add_collateral(bots: DynArray[address, MAX_SIZE], swap_infos: DynArray[DynArray[SwapInfo, MAX_SIZE], MAX_SIZE], collateral: DynArray[address, MAX_SIZE], lend_amount: DynArray[uint256, MAX_SIZE]):
     assert msg.sender == self.compass, "Not compass"
     _len: uint256 = len(bots)
     assert _len == len(collateral) and _len == len(lend_amount), "Validation error"
@@ -198,7 +206,7 @@ def add_collateral(bots: DynArray[address, MAX_SIZE], collateral: DynArray[addre
         if i >= _len:
             break
         assert self.bot_to_owner[bots[i]] != empty(address), "Bot not exist"
-        Bot(bots[i]).add_collateral([], collateral[i], lend_amount[i])
+        Bot(bots[i]).add_collateral(swap_infos[i], collateral[i], lend_amount[i])
         log AddCollateral(bots[i], collateral[i], lend_amount[i])
         log GasPaid(bots[i], self.fee_data.gas_fee)
 
@@ -251,9 +259,9 @@ def withdraw_event(collateral: address, withdraw_amount: uint256):
         log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
 
 @external
-def bot_start_event(collateral: address, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
+def bot_start_event(collateral: address, health_threshold: int256, expire: uint256, repayable: bool):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
-    log BotStarted(msg.sender, collateral, health_threshold, leverage, expire, repayable)
+    log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
 
 @external
 @view
