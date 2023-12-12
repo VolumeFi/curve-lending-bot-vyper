@@ -44,7 +44,7 @@ interface WrappedEth:
 
 interface Factory:
     def fee_data() -> FeeData: view
-    def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256, expire: uint256, repayable: bool): nonpayable
+    def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, additional_tokens: DynArray[address, MAX_SIZE], additional_amounts: DynArray[uint256, MAX_SIZE], withdraw_amount: uint256, health_threshold: int256, expire: uint256, repayable: bool): nonpayable
     def add_collateral_event(collateral: address, collateral_amount: uint256, lend_amount: uint256): nonpayable
     def repay_event(collateral: address, input_amount: uint256, repay_amount: uint256): nonpayable
     def remove_collateral_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256): nonpayable
@@ -85,8 +85,9 @@ def __init__(controller_factory: address, weth: address, crv_usd: address, owner
 @external
 @payable
 @nonreentrant('lock')
-def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256, expire: uint256, repayable: bool):
+def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, additional_tokens: DynArray[address, MAX_SIZE], additional_amounts: DynArray[uint256, MAX_SIZE], debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256, expire: uint256, repayable: bool):
     assert msg.sender == OWNER, "Unauthorized"
+    assert len(additional_tokens) == len(additional_amounts), "Validation error"
     collateral_amount: uint256 = 0
     for swap_info in swap_infos:
         last_index: uint256 = 0
@@ -101,42 +102,44 @@ def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, l
             if swap_info.route[0] == VETH:
                 assert msg.value >= amount, "Insufficient deposit"
             else:
-                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
                 if swap_info.route[0] == WETH:
                     WrappedEth(WETH).withdraw(amount)
                 else:
-                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
                     amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         else:
             if swap_info.route[0] == VETH:
                 assert msg.value >= amount, "Insufficient deposit"
                 amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
             else:
-                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
                 if swap_info.route[0] != collateral:
-                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
                     amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         collateral_amount += amount
     assert collateral_amount > 0, "Insufficient lend"
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     fee_data: FeeData = Factory(FACTORY).fee_data()
     fee_amount: uint256 = unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR)
-    _lend_amount: uint256 = lend_amount
-    if _lend_amount > collateral_amount - fee_amount:
-        _lend_amount = unsafe_sub(collateral_amount, fee_amount)
+    _lend_amount: uint256 = unsafe_sub(collateral_amount, fee_amount)
     if collateral == WETH:
         if fee_amount > 0:
             send(fee_data.service_fee_collector, fee_amount)
         Controller(controller).create_loan(_lend_amount, debt, N, value=_lend_amount)
     else:
-        self._safe_transfer_from(collateral, OWNER, self, collateral_amount)
+        assert ERC20(collateral).transferFrom(OWNER, self, collateral_amount, default_return_value=True), "TF fail"
         if fee_amount > 0:
-            self._safe_transfer(collateral, fee_data.service_fee_collector, fee_amount)
-        self._safe_approve(collateral, controller, _lend_amount)
+            assert ERC20(collateral).transfer(fee_data.service_fee_collector, fee_amount, default_return_value=True), "Tr fail"
+        assert ERC20(collateral).approve(controller, _lend_amount, default_return_value=True), "Ap fail"
         Controller(controller).create_loan(_lend_amount, debt, N)
     if withdraw_amount > 0:
         ERC20(crvUSD).transfer(OWNER, withdraw_amount)
-    Factory(FACTORY).create_loan_event(collateral, collateral_amount, lend_amount, debt, withdraw_amount, health_threshold, expire, repayable)
+    i: uint256 = 0
+    for add_token in additional_tokens:
+        assert ERC20(add_token).transferFrom(OWNER, self, additional_amounts[i], default_return_value=True), "TF fail"
+        i = unsafe_add(i, 1)
+    Factory(FACTORY).create_loan_event(collateral, collateral_amount, _lend_amount, debt, additional_tokens, additional_amounts, withdraw_amount, health_threshold, expire, repayable)
 
 
 @external
@@ -158,20 +161,20 @@ def add_collateral(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address
             if swap_info.route[0] == VETH:
                 assert msg.value >= amount, "Insufficient deposit"
             else:
-                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
                 if swap_info.route[0] == WETH:
                     WrappedEth(WETH).withdraw(amount)
                 else:
-                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
                     amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         else:
             if swap_info.route[0] == VETH:
                 assert msg.value >= amount, "Insufficient deposit"
                 amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
             else:
-                self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
+                assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
                 if swap_info.route[0] != collateral:
-                    self._safe_approve(swap_info.route[0], ROUTER, amount)
+                    assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
                     amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         collateral_amount += amount
     assert collateral_amount > 0 or lend_amount > 0, "Wrong input"
@@ -185,10 +188,10 @@ def add_collateral(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address
             Controller(controller).add_collateral(lend_amount, value=lend_amount)
     else:
         if collateral_amount > 0 and fee_data.service_fee > 0:
-            self._safe_transfer(collateral, fee_data.service_fee_collector, unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR))
+            assert ERC20(collateral).transfer(fee_data.service_fee_collector, unsafe_div(collateral_amount * fee_data.service_fee, DENOMINATOR), default_return_value=True), "Tr fail"
         if lend_amount > 0:
             assert ERC20(collateral).balanceOf(self) >= lend_amount, "Insufficient balance"
-            self._safe_approve(collateral, controller, lend_amount)
+            assert ERC20(collateral).approve(controller, lend_amount, default_return_value=True), "Ap fail"
             Controller(controller).add_collateral(lend_amount)
     if msg.sender == FACTORY:
         assert self.balance >= fee_data.gas_fee, "Insufficient gas fee"
@@ -207,7 +210,7 @@ def remove_collateral(collateral: address, collateral_amount: uint256, withdraw_
         if collateral == WETH:
             send(OWNER, withdraw_amount)
         else:
-            self._safe_transfer(collateral, OWNER, withdraw_amount)
+            assert ERC20(collateral).transfer(OWNER, withdraw_amount, default_return_value=True), "Tr fail"
     Factory(FACTORY).remove_collateral_event(collateral, collateral_amount, withdraw_amount)
 
 @external
@@ -218,8 +221,8 @@ def borrow_more(collateral: address, collateral_amount: uint256, lend_amount: ui
     if collateral == WETH:
         Controller(controller).borrow_more(lend_amount, debt, value=lend_amount)
     else:
-        self._safe_transfer_from(collateral, OWNER, self, collateral_amount)
-        self._safe_approve(collateral, controller, lend_amount)
+        assert ERC20(collateral).transferFrom(OWNER, self, collateral_amount, default_return_value=True), "TF fail"
+        assert ERC20(collateral).approve(controller, lend_amount, default_return_value=True), "Ap fail"
         Controller(controller).borrow_more(lend_amount, debt)
     ERC20(crvUSD).transfer(OWNER, withdraw_amount)
     Factory(FACTORY).borrow_more_event(collateral, lend_amount, withdraw_amount)
