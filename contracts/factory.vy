@@ -111,7 +111,6 @@ event BotStarted:
     bot: address
     collateral: address
     health_threshold: int256
-    leverage: uint256
     expire: uint256
     repayable: bool
 
@@ -168,13 +167,13 @@ def deploy_curve_lending_bot():
     log DeployCurveLendingBot(bot, msg.sender)
 
 @external
-def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
+def create_loan_event(collateral: address, collateral_amount: uint256, lend_amount: uint256, debt: uint256, withdraw_amount: uint256, health_threshold: int256, expire: uint256, repayable: bool):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
     log DepositCollateral(msg.sender, collateral, collateral_amount)
     log AddCollateral(msg.sender, collateral, lend_amount)
     log Borrow(msg.sender, collateral, debt)
     log OutputStablecoin(msg.sender, withdraw_amount)
-    log BotStarted(msg.sender, collateral, health_threshold, leverage, expire, repayable)
+    log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
 
 @external
 def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amount: uint256, input_amount: uint256, repay_amount: uint256):
@@ -251,9 +250,9 @@ def withdraw_event(collateral: address, withdraw_amount: uint256):
         log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
 
 @external
-def bot_start_event(collateral: address, health_threshold: int256, leverage: uint256, expire: uint256, repayable: bool):
+def bot_start_event(collateral: address, health_threshold: int256, expire: uint256, repayable: bool):
     assert self.bot_to_owner[msg.sender] != empty(address), "Not bot"
-    log BotStarted(msg.sender, collateral, health_threshold, leverage, expire, repayable)
+    log BotStarted(msg.sender, collateral, health_threshold, expire, repayable)
 
 @external
 @view
