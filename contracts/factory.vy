@@ -13,11 +13,11 @@ struct FeeData:
     service_fee: uint256
 
 struct SwapInfo:
-    route: address[9]
-    swap_params: uint256[3][4]
+    route: address[11]
+    swap_params: uint256[5][5]
     amount: uint256
-    pools: address[4]
     expected: uint256
+    pools: address[5]
 
 interface Bot:
     def add_collateral(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, lend_amount: uint256): nonpayable
@@ -34,7 +34,7 @@ interface ControllerFactory:
     def stablecoin() -> address: view
 
 MAX_SIZE: constant(uint256) = 8
-DENOMINATOR: constant(uint256) = 10000
+DENOMINATOR: constant(uint256) = 10 ** 18
 WETH: immutable(address)
 crvUSD: immutable(address)
 CONTROLLER_FACTORY: immutable(address)
@@ -198,10 +198,8 @@ def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amoun
 def add_collateral(bots: DynArray[address, MAX_SIZE], swap_infos: DynArray[DynArray[SwapInfo, MAX_SIZE], MAX_SIZE], collateral: DynArray[address, MAX_SIZE], lend_amount: DynArray[uint256, MAX_SIZE]):
     assert msg.sender == self.compass, "Not compass"
     _len: uint256 = len(bots)
-    assert _len == len(collateral) and _len == len(lend_amount), "Validation error"
-    payload_len: uint256 = unsafe_add(unsafe_mul(unsafe_add(_len, 2), 96), 36)
-    assert len(msg.data) == payload_len, "Invalid payload"
-    assert self.paloma == convert(slice(msg.data, unsafe_sub(payload_len, 32), 32), bytes32), "Invalid paloma"
+    assert _len == len(collateral) and _len == len(lend_amount) and _len == len(swap_infos), "Validation error"
+    assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
     for i in range(MAX_SIZE):
         if i >= _len:
             break

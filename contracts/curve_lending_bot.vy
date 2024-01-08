@@ -16,8 +16,8 @@ struct SwapInfo:
     route: address[11]
     swap_params: uint256[5][5]
     amount: uint256
-    pools: address[5]
     expected: uint256
+    pools: address[5]
 
 interface ControllerFactory:
     def get_controller(collateral: address) -> address: view
@@ -63,7 +63,7 @@ interface CurveSwapRouter:
         _receiver: address=msg.sender
     ) -> uint256: payable
 
-DENOMINATOR: constant(uint256) = 10000
+DENOMINATOR: constant(uint256) = 10 ** 18
 MAX_SIZE: constant(uint256) = 8
 VETH: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 FACTORY: immutable(address)
@@ -88,6 +88,7 @@ def __init__(controller_factory: address, weth: address, crv_usd: address, owner
 def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, additional_tokens: DynArray[address, MAX_SIZE], additional_amounts: DynArray[uint256, MAX_SIZE], debt: uint256, withdraw_amount: uint256, N: uint256, health_threshold: int256, expire: uint256, repayable: bool):
     assert msg.sender == OWNER, "Unauthorized"
     assert len(additional_tokens) == len(additional_amounts), "Validation error"
+    _value: uint256 = msg.value
     collateral_amount: uint256 = 0
     for swap_info in swap_infos:
         last_index: uint256 = 0
@@ -100,7 +101,8 @@ def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, a
         assert amount > 0, "Insufficient deposit"
         if collateral == WETH:
             if swap_info.route[0] == VETH:
-                assert msg.value >= amount, "Insufficient deposit"
+                assert _value >= amount, "Insufficient deposit"
+                _value = unsafe_sub(_value, amount)
             else:
                 assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
                 if swap_info.route[0] == WETH:
@@ -110,7 +112,8 @@ def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, a
                     amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         else:
             if swap_info.route[0] == VETH:
-                assert msg.value >= amount, "Insufficient deposit"
+                assert _value >= amount, "Insufficient deposit"
+                _value = unsafe_sub(_value, amount)
                 amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
             else:
                 assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
@@ -137,9 +140,15 @@ def create_loan(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, a
         ERC20(crvUSD).transfer(OWNER, withdraw_amount)
     i: uint256 = 0
     for add_token in additional_tokens:
-        assert ERC20(add_token).transferFrom(OWNER, self, additional_amounts[i], default_return_value=True), "TF fail"
+        if add_token == VETH:
+            assert _value >= additional_amounts[i], "Insufficient deposit"
+            _value = unsafe_sub(_value, additional_amounts[i])
+        else:
+            assert ERC20(add_token).transferFrom(OWNER, self, additional_amounts[i], default_return_value=True), "TF fail"
         i = unsafe_add(i, 1)
     Factory(FACTORY).create_loan_event(collateral, collateral_amount, _lend_amount, debt, additional_tokens, additional_amounts, withdraw_amount, health_threshold, expire, repayable)
+    if _value > 0:
+        send(msg.sender, _value)
 
 
 @external
