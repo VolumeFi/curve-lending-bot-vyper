@@ -193,13 +193,17 @@ def cancel_event(collateral: address, collateral_amount: uint256, withdraw_amoun
     log WithdrawCollateral(msg.sender, collateral, withdraw_amount)
     log BotCanceled(msg.sender, collateral)
 
+@internal
+def _paloma_check():
+    assert msg.sender == self.compass, "Not compass"
+    assert self.paloma == convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32), "Invalid paloma"
+
 @external
 @nonreentrant('lock')
 def add_collateral(bots: DynArray[address, MAX_SIZE], swap_infos: DynArray[DynArray[SwapInfo, MAX_SIZE], MAX_SIZE], collateral: DynArray[address, MAX_SIZE], lend_amount: DynArray[uint256, MAX_SIZE]):
-    assert msg.sender == self.compass, "Not compass"
+    self._paloma_check()
     _len: uint256 = len(bots)
     assert _len == len(collateral) and _len == len(lend_amount) and _len == len(swap_infos), "Validation error"
-    assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
     for i in range(MAX_SIZE):
         if i >= _len:
             break
@@ -223,12 +227,9 @@ def borrow_more_event(collateral: address, lend_amount: uint256, withdraw_amount
 @external
 @nonreentrant('lock')
 def repay(bots: DynArray[address, MAX_SIZE], collateral: DynArray[address, MAX_SIZE], repay_amount: DynArray[uint256, MAX_SIZE]):
-    assert msg.sender == self.compass, "Not compass"
+    self._paloma_check()
     _len: uint256 = len(bots)
     assert _len == len(collateral) and _len == len(repay_amount), "Validation error"
-    payload_len: uint256 = unsafe_add(unsafe_mul(unsafe_add(_len, 2), 96), 36)
-    assert len(msg.data) == payload_len, "Invalid payload"
-    assert self.paloma == convert(slice(msg.data, unsafe_sub(payload_len, 32), 32), bytes32), "Invalid paloma"
     for i in range(MAX_SIZE):
         if i >= _len:
             break
@@ -286,13 +287,13 @@ def state(collateral: address, bot: address) -> uint256[4]:
 
 @external
 def update_compass(new_compass: address):
-    assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
+    self._paloma_check()
     self.compass = new_compass
     log UpdateCompass(msg.sender, new_compass)
 
 @external
 def update_blueprint(new_blueprint: address):
-    assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
+    self._paloma_check()
     old_blueprint:address = self.blueprint
     self.blueprint = new_blueprint
     log UpdateCompass(old_blueprint, new_blueprint)
@@ -306,28 +307,33 @@ def set_paloma():
 
 @external
 def update_refund_wallet(new_refund_wallet: address):
-    assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
+    self._paloma_check()
     old_refund_wallet: address = self.fee_data.refund_wallet
     self.fee_data.refund_wallet = new_refund_wallet
     log UpdateRefundWallet(old_refund_wallet, new_refund_wallet)
 
 @external
 def update_gas_fee(new_gas_fee: uint256):
-    assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
+    self._paloma_check()
     old_gas_fee: uint256 = self.fee_data.gas_fee
     self.fee_data.gas_fee = new_gas_fee
     log UpdateGasFee(old_gas_fee, new_gas_fee)
 
 @external
 def update_service_fee_collector(new_service_fee_collector: address):
-    assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
+    self._paloma_check()
     old_service_fee_collector: address = self.fee_data.service_fee_collector
     self.fee_data.service_fee_collector = new_service_fee_collector
     log UpdateServiceFeeCollector(old_service_fee_collector, new_service_fee_collector)
 
 @external
 def update_service_fee(new_service_fee: uint256):
-    assert msg.sender == self.compass and len(msg.data) == 68 and convert(slice(msg.data, 36, 32), bytes32) == self.paloma, "Unauthorized"
+    self._paloma_check()
     old_service_fee: uint256 = self.fee_data.service_fee
     self.fee_data.service_fee = new_service_fee
     log UpdateServiceFee(old_service_fee, new_service_fee)
+
+@external
+@payable
+def __default__():
+    pass
